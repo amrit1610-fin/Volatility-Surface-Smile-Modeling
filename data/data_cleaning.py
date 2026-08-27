@@ -38,10 +38,13 @@ class CleanedOptionChain:
                 except Exception as e:
                     print(f"Error processing {filename}: {e}")
 
-        # Concatenate and return
-        if cleaned_dataframes:
-            master_df = pd.concat(cleaned_dataframes, ignore_index=True)
-            print(f"\nSuccessfully concatenated {len(cleaned_dataframes)} files!")
+        # Return all dfs
+        return cleaned_dataframes
+
+    def concatenate_data(self, cleaned_dfs):
+        if cleaned_dfs:
+            master_df = pd.concat(cleaned_dfs, ignore_index=True)
+            print(f"\nSuccessfully concatenated {len(cleaned_dfs)} files!")
             return master_df
         else:
             print("No CSV files were found or successfully processed.")
