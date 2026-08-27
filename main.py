@@ -1,12 +1,15 @@
 import pandas as pd
+import numpy as np
 from data.data_cleaning import CleanedOptionChain
 from utils.implied_vol import ImpliedVolatility
 from utils.arbitrage_checks import ArbitrageChecks
 
+# =============================DATA & PREPROCESSING===========================================
 # VARIABLES
 data_folder_path = "data/option_chains"
 spot = 24281.30
 rate = 0.07
+dividend_yield = 0.013
 
 # OPTIONS CHAIN DATA
 data_engine = CleanedOptionChain(data_folder_path, spot, rate)
@@ -45,4 +48,10 @@ if violations:
 else:
     print(f"   ✅ No Calendar violations.")
 
+
+# IMPLEMENT LOG-MONEYNESS
+final_df['forward'] = final_df['underlying_price'] * np.exp((final_df['rate'] - dividend_yield) * final_df['T'])
+final_df['log_moneyness'] = np.log(final_df['strike'] / final_df['forward'])
+
 print(final_df.head())
+
