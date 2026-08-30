@@ -25,34 +25,48 @@ class HestonPricer:
     
     @staticmethod
     def _char_func(u: np.ndarray, S0: float, T: float, r: float, q: float,
-                   kappa: float, theta: float, sigma: float, rho: float, v0: float) -> np.ndarray:
+                kappa: float, theta: float, sigma: float, rho: float, v0: float) -> np.ndarray:
         """
-        Heston characteristic function.
-        Using the "Little Heston Trap" formulation (Attribution: Albrecher et al.) to ensure stability.
+        Heston characteristic function using the "Little Heston Trap" 
+        (Albrecher et al., 2007) for numerical stability.
         """
         i = 1j
-        # Parameters
-        x = np.log(S0)
         tau = T
         
-        # Little Heston Trap parameters
+        # --- 1. Define beta and gamma ---
         beta = kappa - rho * sigma * i * u
-        gamma = (sigma**2 * (u**2 + i * u) + beta**2) ** 0.5
-        gamma = np.sqrt(np.maximum(gamma.real, 0) + 1j * gamma.imag)  # Ensure principal branch
+        gamma = np.sqrt(sigma**2 * (u**2 + i * u) + beta**2)
         
-        # Terms
+        # Ensure gamma has positive real part to avoid branch cuts
+        gamma = np.sqrt(np.maximum(gamma.real, 0) + 1j * gamma.imag)
+        
+        # --- 2. Compute exp(-gamma * tau) ---
         exp_m = np.exp(-gamma * tau)
-        numerator = (beta + gamma) * (1 - exp_m)
-        denominator = 2 * gamma * (1 + ((beta + gamma) / (2 * gamma)) * (1 - exp_m))
         
-        # C and D coefficients
-        C = (r - q) * i * u * tau + (kappa * theta / sigma**2) * (
-            (beta - gamma) * tau - 2 * np.log((1 - ((beta - gamma) / (2 * gamma)) * (1 - exp_m)) / (2 * gamma))
-        )
+        # --- 3. Compute g = (beta - gamma) / (beta + gamma) ---
+        # Handle case where beta+gamma is extremely small (numerical edge case)
+        denom_g = beta + gamma
+        denom_g = np.where(np.abs(denom_g) < 1e-12, 1e-12, denom_g)
+        g = (beta - gamma) / denom_g
+        
+        # --- 4. Compute D coefficient (multiplier for v0) ---
+        # D = (beta - gamma) / sigma^2 * (1 - exp(-gamma*tau)) / (1 - g * exp(-gamma*tau))
+        numerator = (beta - gamma) / sigma**2 * (1 - exp_m)
+        denominator = 1 - g * exp_m
         D = numerator / denominator
+    
+        # --- 5. Compute C coefficient (drift term) ---
+        # C = (r - q)*i*u*tau + (kappa*theta/sigma^2) * [(beta - gamma)*tau - 2*log((1 - g*exp(-gamma*tau))/(1 - g))]
+        log_term = np.log(denominator / (1 - g))
+        # In Little Heston Trap, we use this specific log form to avoid singularities at u=0
+        # The term becomes 0 when u=0, so we handle it safely
+        term1 = (beta - gamma) * tau
+        term2 = -2 * log_term
+        C = (r - q) * i * u * tau + (kappa * theta / sigma**2) * (term1 + term2)
         
-        # Characteristic function
-        phi = np.exp(C + D * v0 + i * u * x)
+        # --- 6. Characteristic function ---
+        phi = np.exp(C + D * v0 + i * u * np.log(S0))
+        
         return phi
     
     def price_call_cos(self, S0: float, K: float, T: float,
