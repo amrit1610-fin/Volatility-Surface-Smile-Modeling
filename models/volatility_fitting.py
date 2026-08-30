@@ -303,10 +303,3 @@ class VolatilityFitter:
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.show()
-    
-    def plot_surface(self) -> None:
-        """
-        (Placeholder) Will be implemented in Phase 4: Tenor Interpolation.
-        This is a reminder to build the 3D surface in the next phase.
-        """
-        print("3D Surface plot coming in Phase 4 (Tenor Interpolation).")
