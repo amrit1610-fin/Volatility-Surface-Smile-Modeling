@@ -96,3 +96,6 @@ interpolator.plot_heatmap(strikes_grid, T_grid)                    # Plot the He
 T_42days = 42 / 365.0                                              # Query a specific point (e.g., 42 days, strike 24500)
 iv_at_point = interpolator.get_vol(strike=24500.0, T=T_42days)
 print(f"IV for Strike 24500, 42 days: {iv_at_point:.4f}")
+
+
+# ============================= HESTON CALIBRATION ==============================
