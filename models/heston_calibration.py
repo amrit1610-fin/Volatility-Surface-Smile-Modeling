@@ -11,15 +11,7 @@ class HestonPricer:
     """
     Heston model pricer using the COS (Fourier-Cosine) method.
     """
-    
     def __init__(self, r: float, q: float = 0.0):
-        """
-        Initialize the pricer.
-        
-        Args:
-            r: Risk-free rate.
-            q: Dividend yield (default: 0.0).
-        """
         self.r = r
         self.q = q
     
@@ -28,104 +20,87 @@ class HestonPricer:
                 kappa: float, theta: float, sigma: float, rho: float, v0: float) -> np.ndarray:
         """
         Heston characteristic function using the "Little Heston Trap" 
-        (Albrecher et al., 2007) for numerical stability.
         """
         i = 1j
         tau = T
-        
-        # --- 1. Define beta and gamma ---
+    
         beta = kappa - rho * sigma * i * u
         gamma = np.sqrt(sigma**2 * (u**2 + i * u) + beta**2)
-        
-        # Ensure gamma has positive real part to avoid branch cuts
         gamma = np.sqrt(np.maximum(gamma.real, 0) + 1j * gamma.imag)
         
-        # --- 2. Compute exp(-gamma * tau) ---
         exp_m = np.exp(-gamma * tau)
-        
-        # --- 3. Compute g = (beta - gamma) / (beta + gamma) ---
-        # Handle case where beta+gamma is extremely small (numerical edge case)
         denom_g = beta + gamma
         denom_g = np.where(np.abs(denom_g) < 1e-12, 1e-12, denom_g)
         g = (beta - gamma) / denom_g
-        
-        # --- 4. Compute D coefficient (multiplier for v0) ---
-        # D = (beta - gamma) / sigma^2 * (1 - exp(-gamma*tau)) / (1 - g * exp(-gamma*tau))
+
         numerator = (beta - gamma) / sigma**2 * (1 - exp_m)
         denominator = 1 - g * exp_m
         D = numerator / denominator
-    
-        # --- 5. Compute C coefficient (drift term) ---
-        # C = (r - q)*i*u*tau + (kappa*theta/sigma^2) * [(beta - gamma)*tau - 2*log((1 - g*exp(-gamma*tau))/(1 - g))]
+
         log_term = np.log(denominator / (1 - g))
-        # In Little Heston Trap, we use this specific log form to avoid singularities at u=0
-        # The term becomes 0 when u=0, so we handle it safely
         term1 = (beta - gamma) * tau
         term2 = -2 * log_term
         C = (r - q) * i * u * tau + (kappa * theta / sigma**2) * (term1 + term2)
         
-        # --- 6. Characteristic function ---
+        # --- Characteristic function ---
         phi = np.exp(C + D * v0 + i * u * np.log(S0))
         
         return phi
     
     def price_call_cos(self, S0: float, K: float, T: float,
-                       kappa: float, theta: float, sigma: float, rho: float, v0: float,
-                       N: int = 128, L: float = 12.0) -> float:
+                   kappa: float, theta: float, sigma: float, rho: float, v0: float,
+                   N: int = 128, L: float = 12.0) -> float:
         """
         Price a European call option using the COS method.
-        
-        Args:
-            S0: Spot price.
-            K: Strike price.
-            T: Time to expiry.
-            kappa, theta, sigma, rho, v0: Heston parameters.
-            N: Number of cosine expansion terms (default: 128).
-            L: Truncation parameter for integration domain (default: 12.0).
-        
-        Returns:
-            Call price.
         """
         r = self.r
         q = self.q
         
-        # Integration domain
+        # 1. Integration domain
         x0 = np.log(S0)
         a = x0 - L * np.sqrt(T)
         b = x0 + L * np.sqrt(T)
+        A = b - a  # <--- FIX 1: A is now initialized
         
-        # Payoff coefficients for call option (V_k)
-        # V_k = 2/(b-a) * Integral_{a}^{b} payoff(y) * cos(k*pi*(y-a)/(b-a)) dy
-        # For call payoff: max(S0*e^y - K, 0)
+        # 2. Payoff truncation
         payoff_a = np.log(K / S0)
-        # Clip to ensure payoff_a is within [a, b]
         payoff_a = np.clip(payoff_a, a, b)
         
+        # 3. Compute coefficients V_k
         V = np.zeros(N)
         for k in range(N):
-            k_pi = k * np.pi / (b - a)
-            eta_k = 2.0 if k == 0 else 1.0
-            # Integral from payoff_a to b
-            term1 = (np.cos(k_pi * (b - a)) * np.exp(b) - np.cos(k_pi * (payoff_a - a)) * np.exp(payoff_a)) / (1 + (k_pi)**2)
-            term2 = k_pi * (np.sin(k_pi * (b - a)) * np.exp(b) - np.sin(k_pi * (payoff_a - a)) * np.exp(payoff_a)) / (1 + (k_pi)**2)
-            integral = (term1 + term2) / (b - a)
-            V[k] = eta_k * (S0 / (b - a)) * integral - eta_k * K * (np.sin(k_pi * (b - a)) - np.sin(k_pi * (payoff_a - a))) / (k_pi * (b - a))
+            k_pi = k * np.pi / A
+            # The correct multiplier for Fourier coefficients:
+            # k=0 -> 1/A, k>0 -> 2/A
+            coeff = 1.0 / A if k == 0 else 2.0 / A
+            
+            # Integral of S0 * e^y * cos(...)
+            term_e = (np.cos(k_pi * A) * np.exp(b) - np.cos(k_pi * (payoff_a - a)) * np.exp(payoff_a)) / (1 + k_pi**2)
+            term_e += k_pi * (np.sin(k_pi * A) * np.exp(b) - np.sin(k_pi * (payoff_a - a)) * np.exp(payoff_a)) / (1 + k_pi**2)
+            integral_S0 = term_e
+            
+            # Integral of K * cos(...)
             if k == 0:
-                V[0] = V[0] - eta_k * K * (b - payoff_a) / (b - a)
+                integral_K = K * (b - payoff_a)
+            else:
+                integral_K = K * (np.sin(k_pi * A) - np.sin(k_pi * (payoff_a - a))) / k_pi
+            
+            # V_k = (Correct scaling) * ( S0*integral_S0 - integral_K )
+            V[k] = coeff * (S0 * integral_S0 - integral_K)
         
-        # Characteristic function values at grid points
-        u_k = k * np.pi / (b - a)
+        # 4. Characteristic function values at grid points
+        # Note: u_k = k * pi / A
+        u_k = np.array([k * np.pi / A for k in range(N)])
         phi_k = self._char_func(u_k, S0, T, r, q, kappa, theta, sigma, rho, v0)
         
-        # COS sum
+        # 5. COS sum (Euler exponential term)
         F = np.zeros(N, dtype=complex)
         for k in range(N):
-            eta_k = 2.0 if k == 0 else 1.0
-            F[k] = eta_k * np.exp(1j * k * np.pi * ( - a) / (b - a)) * V[k] * phi_k
+            F[k] = np.exp(1j * k * np.pi * (-a) / A) * V[k] * phi_k
         
-        # Price
+        # 6. Discount and return
         price = np.exp(-r * T) * np.sum(F).real
-        return max(price, 1e-8)  # Prevent negative prices
+        return max(price, 1e-8)  # Prevent negative prices                                      
     
     def implied_vol(self, price: float, S0: float, K: float, T: float,
                     option_type: str = 'call') -> float:
