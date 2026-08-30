@@ -79,16 +79,16 @@ print("SVI Parameters by Expiry:")
 for expiry, res in results.items():
     print(f"{expiry}: a={res['svi_a']:.4f}, b={res['svi_b']:.4f}, rho={res['svi_rho']:.4f}, sigma={res['svi_sigma']:.4f}")
 
-    
+
 # TENOR INTERPOLATION
 interpolator = TenorInterpolator(results)
 
 interpolator.plot_parameter_evolution()                            # Visualize how parameters evolve with time
 strikes_grid = np.linspace(20000, 27000, 50)                       # Define your grid
 
-T_min = interpolator.T_values.min()  # ~0.016
-T_max = interpolator.T_values.max()  # ~0.243
-T_grid = np.linspace(T_min, T_max, 50)  # Only within your fitted range
+T_min = interpolator.T_values.min()  
+T_max = interpolator.T_values.max()  
+T_grid = np.linspace(T_min, T_max, 50)                             # Only within your fitted range
 
 interpolator.plot_surface_3d(strikes_grid, T_grid)                 # Plot the 3D Surface
 interpolator.plot_heatmap(strikes_grid, T_grid)                    # Plot the Heatmap
