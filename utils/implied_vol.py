@@ -38,30 +38,31 @@ class ImpliedVolatility:
 
     @staticmethod
     def compute_iv(S: float, K: float, T: float, r: float, 
-                   market_price: float, option_type: str = 'call') -> float:
-        """
-        Universal static method to compute implied volatility from individual arguments.
-        This is used by HestonPricer and any other module that needs IV without a DataFrame row.
-        """
+                   market_price: float, option_type: str = 'call', q: float = 0.0) -> float:
         if T <= 0 or market_price <= 0:
             return np.nan
         
-        # Intrinsic value check
-        intrinsic = max(0, S - K) if option_type == 'call' else max(0, K - S)
-        if market_price < intrinsic:
+        # FIX: Proper European intrinsic bound
+        if option_type == 'call':
+            intrinsic = max(0, S * np.exp(-q * T) - K * np.exp(-r * T))
+        else:
+            intrinsic = max(0, K * np.exp(-r * T) - S * np.exp(-q * T))
+            
+        # Allow a tiny tolerance for numerical noise on deep OTM options
+        if market_price < intrinsic - 1e-5:
             return np.nan
         
-        # Temporary helper to price BS (since we don't have self here, we instantiate a local helper)
-        # But we can reuse the same logic using a nested function.
         def bs_price(sigma):
             if T <= 0 or sigma <= 0:
                 return intrinsic
-            d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+            # FIX: Incorporate q into d1 and the final pricing legs
+            d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
             d2 = d1 - sigma * np.sqrt(T)
+            
             if option_type == 'call':
-                return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+                return S * np.exp(-q * T) * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
             else:
-                return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+                return K * np.exp(-r * T) * norm.cdf(-d2) - S * np.exp(-q * T) * norm.cdf(-d1)
         
         def obj(sigma):
             return bs_price(sigma) - market_price

@@ -98,17 +98,20 @@ class TenorInterpolator:
         """
         Get implied volatility at a specific (strike, T) point.
         """
+        if T <= 0 or strike <= 0:
+            return np.nan
+
         if model == 'svi':
             F = self.get_forward(T)
             k = np.log(strike / F)
             params = self.get_svi_params(T)
-            
-            # Compute total variance
+
             a, b, rho, m, sigma = params
             w = a + b * (rho * (k - m) + np.sqrt((k - m)**2 + sigma**2))
             w = np.maximum(w, 1e-8)
-            
-            return np.sqrt(w / T)
+
+            iv = np.sqrt(w / T)
+            return iv if iv > 0 and not np.isnan(iv) else np.nan
         else:
             raise NotImplementedError("SABR interpolation not yet implemented.")
     

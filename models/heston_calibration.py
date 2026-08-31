@@ -65,30 +65,25 @@ class HestonPricer:
         A = b - a  
         
         # 2. Payoff truncation
-        payoff_a = np.log(K / S0)
+        payoff_a = np.log(K) 
         payoff_a = np.clip(payoff_a, a, b)
         
         # 3. Compute coefficients V_k
         V = np.zeros(N)
         for k in range(N):
             k_pi = k * np.pi / A
-            # The correct multiplier for Fourier coefficients:
-            # k=0 -> 1/A, k>0 -> 2/A
             coeff = 1.0 / A if k == 0 else 2.0 / A
             
-            # Integral of S0 * e^y * cos(...)
             term_e = (np.cos(k_pi * A) * np.exp(b) - np.cos(k_pi * (payoff_a - a)) * np.exp(payoff_a)) / (1 + k_pi**2)
             term_e += k_pi * (np.sin(k_pi * A) * np.exp(b) - np.sin(k_pi * (payoff_a - a)) * np.exp(payoff_a)) / (1 + k_pi**2)
             integral_S0 = term_e
             
-            # Integral of K * cos(...)
             if k == 0:
                 integral_K = K * (b - payoff_a)
             else:
                 integral_K = K * (np.sin(k_pi * A) - np.sin(k_pi * (payoff_a - a))) / k_pi
             
-            # V_k = (Correct scaling) * ( S0*integral_S0 - integral_K )
-            V[k] = coeff * (S0 * integral_S0 - integral_K)
+            V[k] = coeff * (integral_S0 - integral_K)
         
         # 4. Characteristic function values at grid points
         # Note: u_k = k * pi / A
@@ -98,24 +93,21 @@ class HestonPricer:
         # 5. COS sum (Euler exponential term)
         F = np.zeros(N, dtype=complex)
         for k in range(N):
-            F[k] = np.exp(1j * k * np.pi * (-a) / A) * V[k] * phi_k
+            F[k] = np.exp(1j * k * np.pi * (-a) / A) * V[k] * phi_k[k]
         
         # 6. Discount and return
         price = np.exp(-r * T) * np.sum(F).real
         return max(price, 1e-8)  # Prevent negative prices                                      
     
+
     def implied_vol(self, price: float, S0: float, K: float, T: float,
-                    option_type: str = 'call') -> float:
-        """
-        Compute implied volatility from a Heston price using Brent's method.
-        """
+                option_type: str = 'call') -> float:
+        if np.isnan(price) or price <= 0:
+            return np.nan
+
         iv = ImpliedVolatility.compute_iv(
-            S=S0,
-            K=K,
-            T=T,
-            r=self.r,
-            market_price=price,
-            option_type=option_type
+            S=S0, K=K, T=T, r=self.r, q=self.q,  
+            market_price=price, option_type=option_type
         )
         return iv
 
@@ -124,16 +116,7 @@ class HestonCalibrator:
     """
     Calibrates Heston model parameters to a market implied volatility surface.
     """
-    
     def __init__(self, interpolator, risk_free_rate: float, dividend_yield: float = 0.0):
-        """
-        Initialize the calibrator.
-        
-        Args:
-            interpolator: TenorInterpolator object (contains the SVI surface).
-            risk_free_rate: Risk-free rate.
-            dividend_yield: Dividend yield (default: 0.0).
-        """
         self.interpolator = interpolator
         self.r = risk_free_rate
         self.q = dividend_yield
@@ -143,11 +126,6 @@ class HestonCalibrator:
     def build_calibration_grid(self, strikes: np.ndarray, T_grid: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Build the grid of (strikes, T) and fetch market IVs from the SVI surface.
-        
-        Returns:
-            strikes_mesh: 2D array of strikes.
-            T_mesh: 2D array of T values.
-            market_ivs: 2D array of market implied volatilities.
         """
         K_mesh, T_mesh = np.meshgrid(strikes, T_grid, indexing='ij')
         market_ivs = np.zeros_like(K_mesh)
@@ -159,52 +137,62 @@ class HestonCalibrator:
         return K_mesh, T_mesh, market_ivs
     
     def objective(self, params: np.ndarray, K_mesh: np.ndarray, T_mesh: np.ndarray,
-                  market_ivs: np.ndarray, verbose: bool = False) -> float:
+              market_ivs: np.ndarray, verbose: bool = False) -> float:
         """
         Objective function for calibration: RMSE between Heston and market implied volatilities.
         """
         kappa, theta, sigma, rho, v0 = params
-        
+
         # Enforce Feller condition via penalty
         if 2 * kappa * theta <= sigma**2:
             return 1e6
-        
+
         # Enforce parameter bounds
         if any([x < 0 for x in [kappa, theta, sigma, v0]]) or abs(rho) >= 1:
             return 1e6
-        
+
         total_error = 0.0
         n_points = 0
-        
-        S0 = self.interpolator.underlyings[0]  # Take the first underlying as reference
-        
+
+        S0 = self.interpolator.underlyings[0]
+
         for i in range(K_mesh.shape[0]):
             for j in range(K_mesh.shape[1]):
                 K = K_mesh[i, j]
                 T = T_mesh[i, j]
                 market_iv = market_ivs[i, j]
-                
+
                 if T <= 0 or market_iv <= 0 or np.isnan(market_iv):
                     continue
-                
-                # Price the option under Heston
-                price = self.pricer.price_call_cos(
-                    S0, K, T, kappa, theta, sigma, rho, v0,
-                    N=64, L=12.0
-                )
-                
-                # Convert price to implied volatility
-                model_iv = self.pricer.implied_vol(price, S0, K, T, option_type='call')
-                
-                if not np.isnan(model_iv) and model_iv > 0:
-                    error = (market_iv - model_iv) ** 2
-                    total_error += error
-                    n_points += 1
-        
+
+                try:
+                    # Price the option under Heston
+                    price = self.pricer.price_call_cos(
+                        S0, K, T, kappa, theta, sigma, rho, v0,
+                        N=64, L=12.0
+                    )
+
+                    # Convert price to implied volatility
+                    model_iv = self.pricer.implied_vol(price, S0, K, T, option_type='call')
+
+                    if not np.isnan(model_iv) and model_iv > 0:
+                        error = (market_iv - model_iv) ** 2
+                        total_error += error
+                        n_points += 1
+                except Exception as e:
+                    # If any exception occurs, skip this point
+                    continue
+
         if n_points == 0:
+            # If no valid points, return a large penalty
             return 1e6
-        
+
         rmse = np.sqrt(total_error / n_points)
+        
+        # Optional: print debugging info every 100 evaluations
+        if verbose and np.random.rand() < 0.01:
+            print(f"  n_points={n_points}, RMSE={rmse:.6f}")
+
         return rmse
     
     def calibrate(self, strikes: np.ndarray, T_grid: np.ndarray,
@@ -212,42 +200,35 @@ class HestonCalibrator:
                   verbose: bool = True) -> Dict:
         """
         Calibrate Heston parameters to the SVI surface.
-        
-        Args:
-            strikes: 1D array of strike prices.
-            T_grid: 1D array of time-to-expiry points.
-            initial_guess: [kappa, theta, sigma, rho, v0]. If None, auto-generate.
-            verbose: Print progress.
-        
-        Returns:
-            Dictionary with calibrated parameters and RMSE.
         """
-        # Build the calibration grid
         K_mesh, T_mesh, market_ivs = self.build_calibration_grid(strikes, T_grid)
         
         # Auto-generate initial guess if not provided
+        # Auto-generate initial guess if not provided
         if initial_guess is None:
-            # v0: ATM variance at the shortest expiry
+            # Get ATM variance from the shortest expiry
             T_min = self.interpolator.T_values.min()
             S0 = self.interpolator.underlyings[0]
             atm_iv = self.interpolator.get_vol(S0, T_min)
+            
+            # If get_vol returns NaN, use a fallback
+            if np.isnan(atm_iv) or atm_iv <= 0:
+                atm_iv = 0.25  # Fallback: 25% vol
+            
             v0_guess = atm_iv**2
+            theta_guess = min(v0_guess * 1.2, 0.8)  # Cap at 0.8
             
-            # sigma (vol-of-vol): take from average SABR alpha
-            # We need to extract SABR parameters from the results (if available)
-            # If not, use a reasonable default
-            sigma_guess = 0.5
-            
-            # rho: typical for equity is -0.7 to -0.9
-            rho_guess = -0.7
-            
-            # kappa: mean-reversion speed (2-5 is common)
-            kappa_guess = 2.0
-            
-            # theta: long-term variance (slightly higher than v0)
-            theta_guess = v0_guess * 1.2
+            # Use average SABR parameters if available (from VolatilityFitter results)
+            # If not, use sensible defaults for equity indices
+            sigma_guess = 0.5   # Vol-of-vol
+            rho_guess = -0.7    # Correlation (negative for equities)
+            kappa_guess = 2.0   # Mean-reversion speed
             
             initial_guess = [kappa_guess, theta_guess, sigma_guess, rho_guess, v0_guess]
+    
+            if verbose:
+                print(f"Auto-generated initial guess:")
+                print(f"  κ={kappa_guess:.4f}, θ={theta_guess:.4f}, σ={sigma_guess:.4f}, ρ={rho_guess:.4f}, v0={v0_guess:.4f}")
         
         # Bounds
         bounds = [
@@ -260,7 +241,7 @@ class HestonCalibrator:
         
         # Objective wrapper
         def obj(params):
-            return self.objective(params, K_mesh, T_mesh, market_ivs, verbose=False)
+            return self.objective(params, K_mesh, T_mesh, market_ivs, verbose=True)
         
         # Calibrate using SLSQP
         result = minimize(obj, initial_guess, method='SLSQP', bounds=bounds,
