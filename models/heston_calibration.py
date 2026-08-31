@@ -6,6 +6,8 @@ from scipy.optimize import brentq
 import matplotlib.pyplot as plt
 from typing import Tuple, Dict, Optional
 
+from utils.implied_vol import ImpliedVolatility
+
 
 class HestonPricer:
     """
@@ -60,7 +62,7 @@ class HestonPricer:
         x0 = np.log(S0)
         a = x0 - L * np.sqrt(T)
         b = x0 + L * np.sqrt(T)
-        A = b - a  # <--- FIX 1: A is now initialized
+        A = b - a  
         
         # 2. Payoff truncation
         payoff_a = np.log(K / S0)
@@ -107,27 +109,15 @@ class HestonPricer:
         """
         Compute implied volatility from a Heston price using Brent's method.
         """
-        if option_type == 'call':
-            intrinsic = max(S0 * np.exp(-self.q * T) - K * np.exp(-self.r * T), 0.0)
-        else:
-            intrinsic = max(K * np.exp(-self.r * T) - S0 * np.exp(-self.q * T), 0.0)
-        
-        if price <= intrinsic:
-            return 0.0
-        
-        def bs_price(sigma):
-            d1 = (np.log(S0 / K) + (self.r - self.q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T) + 1e-8)
-            d2 = d1 - sigma * np.sqrt(T)
-            if option_type == 'call':
-                return S0 * np.exp(-self.q * T) * norm.cdf(d1) - K * np.exp(-self.r * T) * norm.cdf(d2)
-            else:
-                return K * np.exp(-self.r * T) * norm.cdf(-d2) - S0 * np.exp(-self.q * T) * norm.cdf(-d1)
-        
-        try:
-            iv = brentq(lambda s: bs_price(s) - price, 1e-6, 5.0, xtol=1e-8)
-            return iv
-        except (ValueError, RuntimeError):
-            return np.nan
+        iv = ImpliedVolatility.compute_iv(
+            S=S0,
+            K=K,
+            T=T,
+            r=self.r,
+            market_price=price,
+            option_type=option_type
+        )
+        return iv
 
 
 class HestonCalibrator:
