@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.interpolate import PchipInterpolator, CubicSpline
+from scipy.interpolate import PchipInterpolator
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from typing import Dict, Tuple, Optional
@@ -34,7 +34,6 @@ class TenorInterpolator:
             for e in sorted_expiries
         ])
         
-        # Store forward and underlying for reference
         self.forwards = np.array([self.results[e]['forward'] for e in sorted_expiries])
         self.underlyings = np.array([self.results[e]['underlying'] for e in sorted_expiries])
         self.expiry_labels = sorted_expiries
@@ -42,33 +41,20 @@ class TenorInterpolator:
     def _fit_interpolators(self) -> None:
         self.interpolators = {}
         
-        # Param names and their preferred interpolation method
-        param_config = {
-            'a': PchipInterpolator,   # Total variance level must be increasing -> monotonic
-            'b': CubicSpline,         # Wing slope can bend
-            'rho': CubicSpline,       # Correlation can bend
-            'm': PchipInterpolator,   # ATM shift should be smooth and monotonic
-            'sigma': CubicSpline      # Curvature can bend
-        }
+        # FIX: Use PchipInterpolator for ALL parameters. 
+        # This prevents the wild oscillations (Runge's phenomenon) caused by CubicSpline 
+        # on unevenly spaced expiries, which was forcing parameters into the hard clamps.
+        param_names = ['a', 'b', 'rho', 'm', 'sigma']
         
-        for idx, (name, interp_class) in enumerate(param_config.items()):
+        for idx, name in enumerate(param_names):
             y_vals = self.svi_params_array[:, idx]
-            # PchipInterpolator requires strictly increasing x. Our T_values are already sorted.
-            if interp_class == PchipInterpolator:
-                self.interpolators[name] = interp_class(self.T_values, y_vals, 
-                                                         extrapolate=True)
-            else:
-                # CubicSpline with natural boundary conditions
-                self.interpolators[name] = interp_class(self.T_values, y_vals, 
-                                                         bc_type='natural', 
-                                                         extrapolate=True)
+            self.interpolators[name] = PchipInterpolator(self.T_values, y_vals, extrapolate=True)
     
     def get_svi_params(self, T: float) -> np.ndarray:
         """
         Get interpolated SVI parameters at a specific time-to-expiry.
         """
         # --- 1. Clamp T strictly to the fitted range ---
-        # Do NOT allow extrapolation outside the min/max T
         T_clamped = np.clip(T, self.T_values.min(), self.T_values.max())
         
         # --- 2. Get interpolated values ---
@@ -79,12 +65,13 @@ class TenorInterpolator:
         sigma = self.interpolators['sigma'](T_clamped)
         
         # --- 3. HARD CLAMP parameters to valid ranges ---
-        a = np.clip(a, 0.001, 1.0)       # Must be positive
-        b = np.clip(b, 0.001, 2.0)       # Must be positive
-        rho = np.clip(rho, -0.999, 0.999)  # Must be between -1 and 1
-        # m can be any reasonable value, but clamp to prevent extreme shifts
+        # With PchipInterpolator, these clamps act only as extreme safety nets 
+        # rather than being routinely triggered by spline overshoots.
+        a = np.clip(a, 0.001, 1.0)       
+        b = np.clip(b, 0.001, 2.0)       
+        rho = np.clip(rho, -0.999, 0.999) 
         m = np.clip(m, -2.0, 2.0)
-        sigma = np.clip(sigma, 0.001, 1.0)  # Must be positive
+        sigma = np.clip(sigma, 0.001, 1.0)  
         
         return np.array([a, b, rho, m, sigma])
     
@@ -134,13 +121,10 @@ class TenorInterpolator:
         return surface
     
     # =========================================================================
-    # 3. Visualization
+    # Visualization Methods (Unchanged)
     # =========================================================================
     
     def plot_parameter_evolution(self) -> None:
-        """
-        Plot how each SVI parameter evolves with time-to-expiry.
-        """
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
         axes = axes.flatten()
         
@@ -152,7 +136,6 @@ class TenorInterpolator:
             ax.scatter(self.T_values, self.svi_params_array[:, idx], 
                       color='red', s=50, label='Fitted Points')
             
-            # Plot smooth curve
             T_smooth = np.linspace(self.T_values.min(), self.T_values.max(), 100)
             y_smooth = self.interpolators[list(self.interpolators.keys())[idx]](T_smooth)
             ax.plot(T_smooth, y_smooth, 'b-', label='Interpolated')
@@ -162,7 +145,6 @@ class TenorInterpolator:
             ax.legend()
             ax.grid(True, alpha=0.3)
         
-        # Remove the last empty subplot (if any)
         if len(param_names) < len(axes):
             fig.delaxes(axes[-1])
         
@@ -171,18 +153,13 @@ class TenorInterpolator:
         plt.show()
     
     def plot_surface_3d(self, strikes: np.ndarray, T_grid: np.ndarray) -> None:
-        """
-        Plot a 3D surface of implied volatility vs Strike and T.
-        """
         surface = self.get_surface(strikes, T_grid)
         
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(111, projection='3d')
         
-        # Create meshgrid
         T_mesh, K_mesh = np.meshgrid(T_grid, strikes)
         
-        # Plot surface
         surf = ax.plot_surface(K_mesh, T_mesh, surface, cmap='viridis', 
                                edgecolor='none', alpha=0.8)
         
@@ -195,9 +172,6 @@ class TenorInterpolator:
         plt.show()
     
     def plot_heatmap(self, strikes: np.ndarray, T_grid: np.ndarray) -> None:
-        """
-        Plot a heatmap of the volatility surface.
-        """
         surface = self.get_surface(strikes, T_grid)
         
         fig, ax = plt.subplots(figsize=(12, 8))
@@ -210,7 +184,6 @@ class TenorInterpolator:
         ax.set_title('Volatility Surface Heatmap (SVI Interpolation)')
         fig.colorbar(im, ax=ax, label='Implied Volatility')
         
-        # Mark the ATM line
         ax.axvline(x=self.underlyings[0], color='red', linestyle='--', alpha=0.5, label='ATM Spot')
         ax.legend()
         plt.show()
