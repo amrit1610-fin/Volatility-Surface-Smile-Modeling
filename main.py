@@ -103,10 +103,10 @@ print("="*60)
 interpolator = TenorInterpolator(results)
 
 # Define grid for surface
-strikes_grid = np.linspace(20000, 27000, 50)
+strikes_grid = np.linspace(22300, 26200, 50) 
 T_min = interpolator.T_values.min()
 T_max = interpolator.T_values.max()
-T_grid = np.linspace(T_min, T_max, 30)  # Slightly coarser for speed
+T_grid = np.linspace(T_min, T_max, 30)
 
 # Compute the SVI surface
 svi_surface = interpolator.get_surface(strikes_grid, T_grid)
@@ -171,8 +171,8 @@ else:
     print("✅ Price is above intrinsic.")
     
 # Calibrate (use a sparser grid for speed, but enough for accuracy)
-strikes_calib = np.linspace(20000, 27000, 25)
-T_calib = np.linspace(T_min, T_max, 15)
+strikes_calib = np.linspace(22300, 26200, 15) 
+T_calib = np.linspace(T_min, T_max, 8)
 heston_results = calibrator.calibrate(strikes_calib, T_calib, verbose=True)
 
 # Extract calibrated parameters

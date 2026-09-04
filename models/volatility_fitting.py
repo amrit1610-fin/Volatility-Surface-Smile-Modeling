@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
+from scipy.optimize import minimize, differential_evolution, NonlinearConstraint
 import matplotlib.pyplot as plt
 from typing import Dict, Optional, Tuple, List, Union
 
@@ -79,37 +79,40 @@ class VolatilityFitter:
         T = df_slice['T'].iloc[0]
         market_iv = df_slice['iv_calc'].values
         
-        atm_idx = np.argmin(np.abs(df_slice['strike'] - df_slice['underlying_price'].iloc[0]))
-        atm_k = k[atm_idx]
-        atm_iv = market_iv[atm_idx]
-        
-        # Lowered artificial floor for a_guess to allow fitting short tenors
-        a_guess = max(0.5 * (atm_iv**2 * T), 1e-6)
-        x0 = [a_guess, 0.1, 0.0, atm_k, 0.1]
-        
         def objective(params):
             a, b, rho, m, sigma = params
             w = VolatilityFitter.svi_total_variance(k, a, b, rho, m, sigma)
             model_iv = np.sqrt(np.maximum(w, 1e-8) / T)
-            # Uniform Sum of Squared Errors prevents the wings from being ignored
             return np.sum((market_iv - model_iv)**2)
         
-        def constraint(params):
+        # The SVI no-arbitrage constraint
+        def constraint_func(params):
             a, b, rho, m, sigma = params
             return 2 - b * (1 + abs(rho))
         
-        cons = [{'type': 'ineq', 'fun': constraint}]
+        # Wrap the function in SciPy's NonlinearConstraint format required by differential_evolution
+        # It forces the output of constraint_func to be between 0.0 and infinity (i.e. >= 0)
+        nlc = NonlinearConstraint(constraint_func, 0.0, np.inf)
         
-        # Adjusted parameter bounds to prevent the optimizer from getting trapped
+        # Global bounds
         bounds = [(1e-6, 1.0), (1e-4, 5.0), (-0.999, 0.999), (-2.0, 2.0), (1e-4, 2.0)]
         
-        result = minimize(objective, x0, method='SLSQP', bounds=bounds,
-                          constraints=cons, options={'maxiter': 2000, 'ftol': 1e-8})
+        result = differential_evolution(
+            objective, 
+            bounds=bounds, 
+            constraints=(nlc,),
+            strategy='best1bin', 
+            maxiter=1000, 
+            tol=1e-6
+        )
         
         if verbose:
             rmse = np.sqrt(result.fun / len(k))
             print(f"  SVI fit success: {result.success}, RMSE: {rmse:.6f}")
-        return result.x if result.success else x0
+            
+        # Fallback parameters in the highly unlikely event the global optimizer fails
+        fallback_params = np.array([0.04, 0.1, 0.0, 0.0, 0.1])
+        return result.x if result.success else fallback_params
     
     def _fit_sabr_slice(self, df_slice: pd.DataFrame, verbose: bool = False) -> np.ndarray:
         F = df_slice['forward'].iloc[0]
@@ -217,13 +220,13 @@ class VolatilityFitter:
         plt.scatter(slice_df['strike'], slice_df['iv_calc'], label='Market Data', 
                     color='blue', alpha=0.6, s=50)
         
-        plt.plot(strikes_plot, iv_svi, 'g-', label='SVI Fit (SLSQP)', linewidth=2)
+        plt.plot(strikes_plot, iv_svi, 'g-', label='SVI Fit (DiffEvol)', linewidth=2)
         plt.plot(strikes_plot, iv_sabr, 'orange', linestyle='--', label='SABR Fit (SLSQP)', linewidth=2)
         plt.axvline(x=F, color='black', linestyle=':', alpha=0.7, label='Forward (ATM)')
         
         plt.xlabel('Strike')
         plt.ylabel('Implied Volatility')
-        plt.title(f'SVI & SABR Fit - {expiry_to_plot} (SLSQP Optimizer)')
+        plt.title(f'SVI & SABR Fit - {expiry_to_plot}')
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
