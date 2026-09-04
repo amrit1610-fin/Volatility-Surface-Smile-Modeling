@@ -1,0 +1,139 @@
+============================================================
+PHASE 1-2: DATA CLEANING & ARBITRAGE CHECKS
+============================================================
+Processed: option-chain-ED-NIFTY-01-Sep-2026.csv
+Processed: option-chain-ED-NIFTY-08-Sep-2026.csv
+Processed: option-chain-ED-NIFTY-15-Sep-2026.csv
+Processed: option-chain-ED-NIFTY-22-Sep-2026.csv
+Processed: option-chain-ED-NIFTY-23-Nov-2026.csv
+Processed: option-chain-ED-NIFTY-27-Oct-2026.csv
+Processed: option-chain-ED-NIFTY-29-Dec-2026.csv
+Processed: option-chain-ED-NIFTY-29-Sep-2026.csv
+
+IV CALCULATIONS
+  IV implemented for one expiry.
+  IV implemented for one expiry.
+  IV implemented for one expiry.
+  IV implemented for one expiry.
+  IV implemented for one expiry.
+  IV implemented for one expiry.
+  IV implemented for one expiry.
+  IV implemented for one expiry.
+
+CHECKING BUTTERFLY ARBITRAGES
+   Butterfly violations found: 50. Corrected.
+   Butterfly violations found: 44. Corrected.
+   Butterfly violations found: 38. Corrected.
+   Butterfly violations found: 29. Corrected.
+   Butterfly violations found: 27. Corrected.
+   Butterfly violations found: 47. Corrected.
+   Butterfly violations found: 10. Corrected.
+   Butterfly violations found: 66. Corrected.
+
+Successfully concatenated 8 files!
+   Calendar violations found: 237. Corrected.
+
+Data ready: 612 rows across 8 expiries.
+Post-filter (OTM-Only & Liquid) rows: 94
+
+============================================================
+PHASE 3: SVI & SABR FITTING (PER EXPIRY)
+============================================================
+
+==================================================
+Fitting expiry: 01-Sep-2026 (N=8)
+  SVI fit success: True, RMSE: 0.009908
+  SABR fit success: True, RMSE: 0.199931
+
+==================================================
+Fitting expiry: 08-Sep-2026 (N=11)
+  SVI fit success: True, RMSE: 0.009055
+  SABR fit success: True, RMSE: 0.185093
+
+==================================================
+Fitting expiry: 15-Sep-2026 (N=14)
+  SVI fit success: True, RMSE: 0.070660
+  SABR fit success: True, RMSE: 0.187740
+
+==================================================
+Fitting expiry: 22-Sep-2026 (N=27)
+  SVI fit success: True, RMSE: 0.064019
+  SABR fit success: True, RMSE: 0.106090
+
+==================================================
+Fitting expiry: 27-Oct-2026 (N=17)
+  SVI fit success: True, RMSE: 0.004976
+  SABR fit success: True, RMSE: 0.145310
+
+==================================================
+Fitting expiry: 29-Sep-2026 (N=17)
+  SVI fit success: True, RMSE: 0.006149
+  SABR fit success: True, RMSE: 0.178713
+
+Fitted Parameters (first 5 rows):
+                  expiry         T       forward  underlying  ... sabr_alpha  sabr_rho  sabr_nu  sabr_beta
+01-Sep-2026  01-Sep-2026  0.016438  24304.061908     24281.3  ...        5.0 -0.999000      5.0        0.5
+08-Sep-2026  08-Sep-2026  0.035616  24330.644436     24281.3  ...        5.0 -0.864772      5.0        0.5
+15-Sep-2026  15-Sep-2026  0.054795  24357.256039     24281.3  ...        5.0 -0.673404      5.0        0.5
+22-Sep-2026  22-Sep-2026  0.073973  24383.896749     24281.3  ...        5.0 -0.540072      5.0        0.5
+27-Oct-2026  27-Oct-2026  0.169863  24517.538009     24281.3  ...        5.0 -0.320587      5.0        0.5
+
+[5 rows x 15 columns]
+
+============================================================
+PHASE 4: TENOR INTERPOLATION & 3D SVI SURFACE
+============================================================
+IV for Strike 24500, 42 days (SVI): 0.1361
+
+============================================================
+PHASE 5: GLOBAL HESTON CALIBRATION
+============================================================
+Auto-generated initial guess:
+  κ=2.0000, θ=0.0863, σ=0.5000, ρ=-0.7000, v0=0.0719
+  n_points=120, RMSE=0.168445
+
+==================================================
+HESTON CALIBRATION RESULTS
+==================================================
+Success: True
+Final RMSE: 0.164923
+Parameter:
+  kappa (κ): 2.0233
+  theta (θ): 0.0555
+  sigma (σ): 0.4740
+  rho (ρ):   -0.6678
+  v0:        0.1016
+
+Feller Condition (2κθ/σ²): 1.00 (Should be > 1)
+✅ Feller condition satisfied.
+
+Calibrated Heston Parameters:
+  κ (kappa) = 2.0233
+  θ (theta) = 0.0555
+  σ (sigma) = 0.4740
+  ρ (rho)   = -0.6678
+  v0        = 0.1016
+  RMSE      = 0.164923
+  Feller    = 1.00
+
+============================================================
+PHASE 6: COMPARISON PLOTS (SVI vs HESTON SURFACE)
+============================================================
+
+============================================================
+PHASE 7: HESTON RISK LADDER (VANNA/VOLGA)
+============================================================
+
+Risk Ladder (T = 0.1151 years):
+    Strike     Price  Delta      Vega  Vanna      Volga
+23500.0000 1914.7989 0.9108 8381.7403 0.4062   450.8714
+23750.0000 1703.7264 0.8788 8361.2076 0.4487 -1821.3353
+24000.0000 1501.3969 0.8421 8319.6820 0.5304 -3970.1068
+24250.0000 1308.9570 0.8004 8243.0804 0.6641 -5557.9817
+24500.0000 1127.6030 0.7534 8115.3373 0.8583 -6138.3256
+24750.0000  958.5282 0.7013 7920.3521 1.1151 -5337.5446
+25000.0000  802.8516 0.6443 7644.2739 1.4280 -2929.0936
+25250.0000  661.5360 0.5834 7277.7474 1.7817  1114.6985
+25500.0000  535.3045 0.5194 6817.7423 2.1534  6602.3829
+
+✅ All phases completed successfully!
