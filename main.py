@@ -9,6 +9,7 @@ from utils.arbitrage_checks import ArbitrageChecks
 from utils.tenor_interpolation import TenorInterpolator
 from models.volatility_fitting import VolatilityFitter
 from models.heston_calibration import HestonCalibrator
+from utils.greeks import HestonGreeks
 
 # ============================= CONFIGURATION ===========================================
 data_folder_path = "data/option_chains"
@@ -78,7 +79,11 @@ final_df = final_df[(final_df['iv_calc'] > 0.01) & (final_df['iv_calc'] < 0.40)]
 # Restrict strikes to a tight, highly liquid window (e.g., +/- 8% from spot)
 final_df = final_df[(final_df['log_moneyness'] > -0.08) & (final_df['log_moneyness'] < 0.08)]
 
-print(f"Post-filter (OTM-Only) rows: {len(final_df)}")
+# 3. Data Starvation Filter
+# Keep only expiries with at least 5 valid options to prevent SVI optimizer failure
+final_df = final_df.groupby('expiry').filter(lambda x: len(x) >= 5)
+
+print(f"Post-filter (OTM-Only & Liquid) rows: {len(final_df)}")
 
 # ============================= VOLATILITY FITTING (SVI & SABR) ==========================
 print("\n" + "="*60)
@@ -92,7 +97,7 @@ params_df = vol_fitter.get_params_dataframe()
 print("\nFitted Parameters (first 5 rows):")
 print(params_df.head())
 
-# Plot fit for a specific expiry (optional)
+# Plot fit for a specific expiry
 vol_fitter.plot_fit(expiry_to_plot='15-Sep-2026')
 
 # ============================= TENOR INTERPOLATION (3D SVI SURFACE) ====================
@@ -102,7 +107,7 @@ print("="*60)
 
 interpolator = TenorInterpolator(results)
 
-# Define grid for surface
+# Define grid for surface restricted to the liquid trained bounds
 strikes_grid = np.linspace(22300, 26200, 50) 
 T_min = interpolator.T_values.min()
 T_max = interpolator.T_values.max()
@@ -127,48 +132,6 @@ calibrator = HestonCalibrator(
     risk_free_rate=rate,
     dividend_yield=dividend_yield
 )
-
-# ===== SINGLE-POINT DEBUG TEST =====
-print("\n" + "="*60)
-print("DEBUG: TESTING HESTON PRICER ON A SINGLE POINT")
-print("="*60)
-
-S0 = spot
-K = 24500.0
-T = 0.0548  # ~20 days (e.g., 15-Sep)
-
-# 1. Get market IV from SVI surface
-market_iv = interpolator.get_vol(K, T)
-print(f"Market IV (SVI) at K={K}, T={T:.4f}: {market_iv:.6f}")
-
-# 2. Compute Heston price using initial guess (same as calibrator)
-kappa_guess = 2.0
-theta_guess = 0.155
-sigma_guess = 0.5
-rho_guess = -0.7
-v0_guess = 0.1292
-
-price = calibrator.pricer.price_call_cos(
-    S0, K, T, 
-    kappa_guess, theta_guess, sigma_guess, rho_guess, v0_guess,
-    N=128, L=12.0
-)
-print(f"Heston Price: {price:.6f}")
-
-# 3. Compute intrinsic value
-intrinsic = max(S0 * np.exp(-dividend_yield * T) - K * np.exp(-rate * T), 0.0)
-print(f"Intrinsic Value: {intrinsic:.6f}")
-print(f"Price - Intrinsic: {price - intrinsic:.6f}")
-
-# 4. Compute implied volatility from the Heston price
-model_iv = calibrator.pricer.implied_vol(price, S0, K, T, option_type='call')
-print(f"Heston IV: {model_iv:.6f}")
-
-# 5. Check if the price is reasonable
-if price < intrinsic:
-    print("❌ ERROR: Heston price is below intrinsic! This will cause IV = NaN.")
-else:
-    print("✅ Price is above intrinsic.")
     
 # Calibrate (use a sparser grid for speed, but enough for accuracy)
 strikes_calib = np.linspace(22300, 26200, 15) 
@@ -194,7 +157,7 @@ print("="*60)
 
 # 1. Compute the Heston surface on the same grid
 heston_surface = np.zeros_like(svi_surface)
-S0 = spot  # Use the spot from the data (or first underlying)
+S0 = spot  # Use the spot from the data
 
 for i, K in enumerate(strikes_grid):
     for j, T in enumerate(T_grid):
@@ -233,8 +196,25 @@ plt.suptitle('Volatility Surface Comparison: SVI (Base) vs Heston (Calibrated)',
 plt.tight_layout()
 plt.show()
 
-# 3. Optional: Overlay plot for a specific expiry
+# 3. Overlay plot for a specific expiry
 expiry_to_plot = T_grid[len(T_grid)//2]  # middle expiry
 calibrator.plot_fit(strikes_calib, T_calib, expiry_to_plot=expiry_to_plot)
+
+# ============================= VANNA/VOLGA RISK LADDER =================================
+print("\n" + "="*60)
+print("PHASE 7: HESTON RISK LADDER (VANNA/VOLGA)")
+print("="*60)
+
+# Initialize the Greeks engine with your calibrated parameters
+greeks_engine = HestonGreeks(pricer=calibrator.pricer, params=params, S0=spot)
+
+# Generate ladder for a 42-day tenor across the liquid strike range
+ladder_T = 42 / 365.0
+ladder_strikes = np.linspace(23500, 25500, 9)
+
+risk_ladder = greeks_engine.compute_risk_ladder(strikes=ladder_strikes, T=ladder_T)
+
+print(f"\nRisk Ladder (T = {ladder_T:.4f} years):")
+print(risk_ladder.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
 print("\n✅ All phases completed successfully!")
