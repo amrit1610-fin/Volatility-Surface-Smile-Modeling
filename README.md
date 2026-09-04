@@ -1,10 +1,3 @@
-Here is a complete, institutional-grade `README.md` file tailored to the exact architecture, challenges, and solutions you implemented in this project.
-
-It highlights not just what the code does, but the quantitative reasoning behind *why* you built it this way—making it a perfect portfolio piece for Volatility Trading, Structuring, or Exotics Quant roles.
-
----
-
-```markdown
 # Volatility Surface & Smile Modeling (SVI + SABR + Heston)
 
 An end-to-end quantitative pipeline that transforms raw, noisy option chain data into a smooth, arbitrage-free 3D volatility surface, and calibrates a dynamic stochastic volatility model to generate higher-order risk sensitivities.
