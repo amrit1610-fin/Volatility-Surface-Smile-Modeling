@@ -61,6 +61,25 @@ final_df['log_moneyness'] = np.log(final_df['strike'] / final_df['forward'])
 
 print(f"\nData ready: {len(final_df)} rows across {final_df['expiry'].nunique()} expiries.")
 
+# =======================================================================
+# THE OTM-ONLY FILTER
+# =======================================================================
+# 1. Standard OTM Filter
+is_put = final_df['option_type'].str.lower().isin(['put', 'pe'])
+is_call = final_df['option_type'].str.lower().isin(['call', 'ce'])
+otm_puts = is_put & (final_df['strike'] < final_df['forward'])
+otm_calls = is_call & (final_df['strike'] >= final_df['forward'])
+final_df = final_df[otm_puts | otm_calls]
+
+# 2. Strict Liquidity & Moneyness Filter
+# Cap IV at a realistic maximum for NIFTY (e.g., 40% or 0.40)
+final_df = final_df[(final_df['iv_calc'] > 0.01) & (final_df['iv_calc'] < 0.40)]
+
+# Restrict strikes to a tight, highly liquid window (e.g., +/- 8% from spot)
+final_df = final_df[(final_df['log_moneyness'] > -0.08) & (final_df['log_moneyness'] < 0.08)]
+
+print(f"Post-filter (OTM-Only) rows: {len(final_df)}")
+
 # ============================= VOLATILITY FITTING (SVI & SABR) ==========================
 print("\n" + "="*60)
 print("PHASE 3: SVI & SABR FITTING (PER EXPIRY)")
