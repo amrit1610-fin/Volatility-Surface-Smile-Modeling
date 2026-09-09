@@ -132,11 +132,32 @@ calibrator = HestonCalibrator(
     risk_free_rate=rate,
     dividend_yield=dividend_yield
 )
-    
+
+# ----Initializing params for Heston----
+T_min = interpolator.T_values.min()
+v0_guess = interpolator.get_vol(spot, T_min)**2
+theta_guess = min(v0_guess * 1.2, 0.8)
+kappa_guess = 2.0 
+# Initial sigma, rho guess using SABR
+avg_sabr_rho = params_df['sabr_rho'].mean()
+
+raw_sabr_nu = params_df['sabr_nu'].mean()
+feller_limit = np.sqrt(2 * kappa_guess * theta_guess) 
+avg_sabr_nu = min(raw_sabr_nu, feller_limit * 0.9, 2.0)     # clamp SABR sigma to feller condition
+
+print(f"Using SABR parameters for Heston initial guess:")
+print(f"  SABR Rho: {avg_sabr_rho:.4f} -> Heston Rho")
+print(f"  SABR Nu:  {avg_sabr_nu:.4f} -> Heston Sigma")
+
+# smart guess of params in an array
+smart_guess = np.array([kappa_guess, theta_guess, avg_sabr_nu, avg_sabr_rho, v0_guess])
+
+# Calibrate using the smart guess
 # Calibrate (use a sparser grid for speed, but enough for accuracy)
 strikes_calib = np.linspace(22300, 26200, 15) 
 T_calib = np.linspace(T_min, T_max, 8)
-heston_results = calibrator.calibrate(strikes_calib, T_calib, verbose=True)
+heston_results = calibrator.calibrate(strikes_calib, T_calib,
+                                        initial_guess=smart_guess, verbose=True)
 
 # Extract calibrated parameters
 params = heston_results['params']
@@ -155,7 +176,7 @@ print("\n" + "="*60)
 print("PHASE 6: COMPARISON PLOTS (SVI vs HESTON SURFACE)")
 print("="*60)
 
-# 1. Compute the Heston surface on the same grid
+# Compute the Heston surface on the same grid
 heston_surface = np.zeros_like(svi_surface)
 S0 = spot  # Use the spot from the data
 
@@ -170,7 +191,7 @@ for i, K in enumerate(strikes_grid):
         iv = calibrator.pricer.implied_vol(price, S0, K, T, option_type='call')
         heston_surface[i, j] = iv if not np.isnan(iv) else 0.0
 
-# 2. Create side-by-side 3D subplots
+# Create side-by-side 3D subplots
 fig = plt.figure(figsize=(16, 7))
 
 # --- Subplot 1: SVI Surface ---
@@ -196,7 +217,7 @@ plt.suptitle('Volatility Surface Comparison: SVI (Base) vs Heston (Calibrated)',
 plt.tight_layout()
 plt.show()
 
-# 3. Overlay plot for a specific expiry
+# Overlay plot for a specific expiry
 expiry_to_plot = T_grid[len(T_grid)//2]  # middle expiry
 calibrator.plot_fit(strikes_calib, T_calib, expiry_to_plot=expiry_to_plot)
 
