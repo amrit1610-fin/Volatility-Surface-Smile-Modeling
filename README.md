@@ -32,7 +32,10 @@ Initial attempts to fit the Raw SVI equation using local optimizers (SLSQP) resu
 ### 2. The "Frankenstein" Surface (Raw SVI Limitations)
 Because Raw SVI fits slices completely independently, optimal parameters can jump wildly between adjacent tenors (e.g., trading high curvature $\sigma$ for a lower wing slope $b$). Interpolating between these disconnected parameter states creates artificial ridges in the 3D surface. 
 
-### 3. Heston as a Structural Regularizer
+### 3. SABR as "Smart Guess" for Heston
+Like Heston, SABR is also a stochastic volatility model and hence it also treats volatility as a function of time. Thus the parameters obtained from the SABR model can easily be used as an initial guess array for the Heston to prevent danger of local minima, reduce convergence time and provide better parameter stability.
+
+### 4. Heston as a Structural Regularizer
 When the Heston calibrator evaluates the interpolated SVI surface, it refuses to overfit to the artificial ridges caused by Raw SVI parameter jumps. Because the Heston model is governed by rigid, time-consistent stochastic calculus, it acts as a structural regularizer—smoothing out interpolation noise and outputting a mathematically flawless, arbitrage-free surface, albeit with a residual RMSE against the broken intermediate SVI grid.
 
 ---
