@@ -1,3 +1,4 @@
+import config
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,9 +14,9 @@ from utils.greeks import HestonGreeks
 
 # ============================= CONFIGURATION ===========================================
 data_folder_path = "data/option_chains"
-spot = 24281.30
-rate = 0.07
-dividend_yield = 0.013
+spot = config.SPOT_PRICE
+rate = config.RISK_FREE_RATE
+dividend_yield = config.DIVIDEND_YIELD
 
 # ============================= DATA & PREPROCESSING ====================================
 print("="*60)
@@ -154,8 +155,8 @@ smart_guess = np.array([kappa_guess, theta_guess, avg_sabr_nu, avg_sabr_rho, v0_
 
 # Calibrate using the smart guess
 # Calibrate (use a sparser grid for speed, but enough for accuracy)
-strikes_calib = np.linspace(22300, 26200, 15) 
-T_calib = np.linspace(T_min, T_max, 8)
+strikes_calib = np.linspace(config.STRIKE_MIN, config.STRIKE_MAX, config.STRIKE_POINTS)
+T_calib = np.linspace(config.TIME_MIN, config.TIME_MAX, config.TIME_POINTS)
 heston_results = calibrator.calibrate(strikes_calib, T_calib,
                                         initial_guess=smart_guess, verbose=True)
 
